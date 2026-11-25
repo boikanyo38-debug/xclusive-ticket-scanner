@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827">
+<title>VIP T&B Xclusive — Ticket Scanner</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui;background:#101827;color:#f8fafc}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:linear-gradient(160deg,#17243a,#0b1220);padding:22px 16px 40px}
+.wrap{max-width:520px;margin:auto}
+.brand{text-align:center;margin:12px 0 24px}
+.brand h1{font-size:22px}
+.brand p,.muted{color:#aebbd0;font-size:14px;line-height:1.5}
+.panel{background:#182438;border:1px solid #30415a;border-radius:18px;padding:20px;margin:14px 0}
+h2{font-size:18px;margin:0 0 14px}
+label{display:block;font-size:13px;color:#c5d0df;margin:12px 0 6px}
+input{width:100%;padding:14px;border-radius:10px;border:1px solid #43536b;background:#0e1828;color:white;font-size:16px}
+button{border:0;border-radius:11px;padding:14px;font-size:16px;font-weight:650;width:100%;margin-top:12px;background:#e8b95e;color:#171717}
+button.secondary{background:#34445c;color:white}
+button:disabled{opacity:.5}
+#reader{width:100%;overflow:hidden;border-radius:12px}
+.status{padding:14px;border-radius:12px;margin-top:14px;font-weight:650;line-height:1.45;white-space:pre-line;overflow-wrap:anywhere}
+.good{background:#123b30;color:#9af0c8}
+.bad{background:#48202a;color:#ffc0ca}
+.neutral{background:#29364a;color:#dce7f5}
+.hidden{display:none!important}
+.foot{text-align:center;color:#8fa0b7;font-size:12px;margin-top:20px}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header class="brand">
+<div style="font-size:30px">🎟️</div>
+<h1>VIP T&amp;B Xclusive Games Night</h1>
+<p>Secure ticket verification</p>
+</header>
+
+<section class="panel hidden" id="recoveryPanel">
+<h2>Set your staff password</h2>
+<p class="muted">Choose a new password for your approved staff account.</p>
+<label for="newPassword">New password</label>
+<input id="newPassword" type="password" autocomplete="new-password" minlength="8">
+<label for="confirmPassword">Confirm new password</label>
+<input id="confirmPassword" type="password" autocomplete="new-password" minlength="8">
+<button id="savePasswordBtn">Save new password</button>
+<div id="recoveryMsg" class="status neutral hidden"></div>
+</section>
+
+<section class="panel" id="loginPanel">
+<h2>Staff sign-in</h2>
+<p class="muted">Only approved staff can validate and redeem tickets.</p>
+<label for="email">Staff email</label>
+<input id="email" type="email" autocomplete="username">
+<label for="password">Password</label>
+<input id="password" type="password" autocomplete="current-password">
+<button id="loginBtn">Sign in securely</button>
+<button class="secondary" id="forgotBtn">Send password recovery email</button>
+<div id="loginMsg" class="status neutral hidden"></div>
+</section>
+
+<section class="panel hidden" id="scannerPanel">
+<h2>Scan a ticket QR</h2>
+<p class="muted">Allow camera access. Each valid ticket can be redeemed only once.</p>
+<div id="reader"></div>
+<button id="startBtn">Start camera</button>
+<button class="secondary hidden" id="againBtn">Scan next ticket</button>
+<button class="secondary" id="logoutBtn">Sign out</button>
+<div id="result" class="status neutral">Ready. Tap Start camera.</div>
+</section>
+
+<p class="foot">For authorised event staff only. Never share ticket-token CSV files.</p>
+</main>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script type="module">
+import {createClient} from "https://esm.sh/@supabase/supabase-js@2";
+
+const URL="https://apdhptncnxsmgrtseioz.supabase.co";
+const KEY="sb_publishable_KbjOlDRO9lS4lqhcGJIMvg_NmmWzZWY";
+const PAGE=URL+"/functions/v1/xclusive-scanner";
+
+const sb=createClient(URL,KEY);
+const $=id=>document.getElementById(id);
+let recovery=false,scanner=null,busy=false;
+
+function show(id,v){$(id).classList.toggle("hidden",!v)}
+function msg(id,t,k="neutral"){
+  $(id).textContent=t;
+  $(id).className="status "+k;
+}
+
+async function sync(){
+  const {data:{session}}=await sb.auth.getSession();
+  show("recoveryPanel",recovery);
+  show("loginPanel",!recovery&&!session);
+  show("scannerPanel",!recovery&&!!session);
+  if(session&&!recovery)msg("result","Signed in. Tap Start camera.","neutral");
+}
+
+sb.auth.onAuthStateChange((event)=>{
+  if(event==="PASSWORD_RECOVERY"){recovery=true;sync()}
+  else if(event==="SIGNED_OUT"){recovery=false;sync()}
+  else if(event==="SIGNED_IN"&&!recovery)sync();
+});
+
+$("savePasswordBtn").onclick=async()=>{
+  let p=$("newPassword").value,c=$("confirmPassword").value;
+  if(p.length<8){
+    msg("recoveryMsg","Use at least 8 characters.","bad");
+    show("recoveryMsg",true);return;
+  }
+  if(p!==c){
+    msg("recoveryMsg","Passwords do not match.","bad");
+    show("recoveryMsg",true);return;
+  }
+  $("savePasswordBtn").disabled=true;
+  let {error}=await sb.auth.updateUser({password:p});
+  $("savePasswordBtn").disabled=false;
+  if(error){
+    msg("recoveryMsg","Could not update password. Request a fresh recovery email and try again.","bad");
+    show("recoveryMsg",true);return;
+  }
+  recovery=false;
+  history.replaceState(null,"",PAGE);
+  $("newPassword").value="";
+  $("confirmPassword").value="";
+  await sb.auth.signOut();
+  msg("loginMsg","Password updated. Sign in with your new password.","good");
+  show("loginMsg",true);
+  sync();
+};
+
+$("forgotBtn").onclick=async()=>{
+  let email=$("email").value.trim();
+  if(!email){
+    msg("loginMsg","Enter your staff email first.","bad");
+    show("loginMsg",true);return;
+  }
+  let {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:PAGE});
+  msg("loginMsg",error
+    ?"Could not send recovery email. Check Auth URL settings."
+    :"If this is an approved staff account, a recovery email has been sent. Check inbox and spam.",
+    "neutral");
+  show("loginMsg",true);
+};
+
+$("loginBtn").onclick=async()=>{
+  let email=$("email").value.trim(),password=$("password").value;
+  if(!email||!password){
+    msg("loginMsg","Enter your staff email and password.","bad");
+    show("loginMsg",true);return;
+  }
+  $("loginBtn").disabled=true;
+  let {error}=await sb.auth.signInWithPassword({email,password});
+  $("loginBtn").disabled=false;
+  if(error){
+    msg("loginMsg","Sign-in failed. Check email and password.","bad");
+    show("loginMsg",true);return;
+  }
+  show("loginMsg",false);
+  sync();
+};
+
+$("logoutBtn").onclick=async()=>{
+  if(scanner){try{await scanner.stop()}catch{}}
+  await sb.auth.signOut();
+};
+
+function tokenOf(s){
+  s=String(s||"").trim();
+  try{
+    let u=new URL(s);
+    return u.searchParams.get("token")||s;
+  }catch{return s}
+}
+
+async function redeem(decoded){
+  if(busy)return;
+  busy=true;
+  try{
+    if(scanner)try{await scanner.pause(true)}catch{}
+    let {data,error}=await sb.functions.invoke("xclusive-redeem",{
+      body:{token:tokenOf(decoded)}
+    });
+    if(error)msg("result","Could not verify. Check connection and sign-in.","bad");
+    else if(data?.result==="VALID")
+      msg("result","✓ VALID TICKET — "+data.ticket_number+"\nRedeemed successfully.","good");
+    else if(data?.result==="ALREADY_USED")
+      msg("result","⚠ ALREADY USED — "+(data.ticket_number||"Ticket")+". Do not admit again.","bad");
+    else if(data?.result==="INVALID")
+      msg("result","✕ INVALID TICKET — Not recognised.","bad");
+    else if(data?.result==="VOID")
+      msg("result","✕ VOID TICKET — Do not admit.","bad");
+    else if(data?.result==="UNAUTHORIZED")
+      msg("result","Staff account is not authorised.","bad");
+    else msg("result","Ticket could not be verified.","bad");
+  }catch{
+    msg("result","Scanner error. Try again.","bad");
+  }
+  show("againBtn",true);
+  $("startBtn").disabled=false;
+}
+
+$("startBtn").onclick=async()=>{
+  if(!window.Html5Qrcode){
+    msg("result","Scanner library failed to load. Check internet and refresh.","bad");
+    return;
+  }
+  if(!scanner)scanner=new Html5Qrcode("reader");
+  $("startBtn").disabled=true;
+  try{
+    await scanner.start(
+      {facingMode:"environment"},
+      {fps:10,qrbox:{width:250,height:250}},
+      redeem,()=>{}
+    );
+    msg("result","Camera on. Hold a ticket QR in the frame.","neutral");
+  }catch{
+    msg("result","Camera could not start. Allow camera access and use HTTPS.","bad");
+  }
+  $("startBtn").disabled=false;
+};
+
+$("againBtn").onclick=async()=>{
+  show("againBtn",false);
+  busy=false;
+  msg("result","Ready for next ticket.","neutral");
+  try{await scanner.resume()}
+  catch{$("startBtn").click()}
+};
+
+await sync();
+</script>
+</body>
+</html>
