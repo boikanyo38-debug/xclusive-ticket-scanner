@@ -1,0 +1,66 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827"><title>VIP T&B Xclusive — Safe Test Scanner</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui;background:#101827;color:#f8fafc}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(160deg,#17243a,#0b1220);padding:22px 16px 40px}
+.wrap{max-width:520px;margin:auto}.brand{text-align:center;margin:12px 0 24px}.brand h1{font-size:22px}
+.brand p,.muted{color:#aebbd0;font-size:14px;line-height:1.5}
+.panel{background:#182438;border:1px solid #30415a;border-radius:18px;padding:20px;margin:14px 0}
+h2{font-size:18px;margin:0 0 14px}label{display:block;font-size:13px;color:#c5d0df;margin:12px 0 6px}
+input{width:100%;padding:14px;border-radius:10px;border:1px solid #43536b;background:#0e1828;color:white;font-size:16px}
+button{border:0;border-radius:11px;padding:14px;font-size:16px;font-weight:650;width:100%;margin-top:12px;background:#e8b95e;color:#171717}
+button.secondary{background:#34445c;color:white}button:disabled{opacity:.5}
+#reader{width:100%;overflow:hidden;border-radius:12px}.status{padding:14px;border-radius:12px;margin-top:14px;font-weight:650;line-height:1.45;white-space:pre-line;overflow-wrap:anywhere}
+.good{background:#123b30;color:#9af0c8}.bad{background:#48202a;color:#ffc0ca}.neutral{background:#29364a;color:#dce7f5}
+.hidden{display:none!important}.safe{background:#173d34;border:1px solid #2e8067;color:#a7f3d0;border-radius:12px;padding:12px;text-align:center;font-weight:800;letter-spacing:.04em}
+.foot{text-align:center;color:#8fa0b7;font-size:12px;margin-top:20px}
+</style></head><body><main class="wrap">
+<header class="brand"><div style="font-size:30px">🎟️</div><h1>VIP T&amp;B Xclusive Games Night</h1><p>Ticket verification</p></header>
+<div class="safe">SAFE TEST MODE — READ ONLY</div>
+<section class="panel" id="loginPanel"><h2>Staff sign-in</h2><p class="muted">Sign in with your approved staff account to test tickets.</p>
+<label for="email">Staff email</label><input id="email" type="email" autocomplete="username">
+<label for="password">Password</label><input id="password" type="password" autocomplete="current-password">
+<button id="loginBtn">Sign in securely</button><div id="loginMsg" class="status neutral hidden"></div></section>
+<section class="panel hidden" id="scannerPanel"><h2>Test a ticket QR</h2>
+<p class="muted">This page only checks the QR against the ticket register. It cannot redeem, update, or mark a ticket as used.</p>
+<div id="reader"></div><button id="startBtn">Start camera</button>
+<button class="secondary hidden" id="againBtn">Test next ticket</button>
+<button class="secondary" id="logoutBtn">Sign out</button>
+<div id="result" class="status neutral">Ready. Tap Start camera.</div></section>
+<p class="foot">Authorised event staff only. Never share ticket-token register files.</p></main>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script type="module">
+import {createClient} from "https://esm.sh/@supabase/supabase-js@2";
+const URL="https://apdhptncnxsmgrtseioz.supabase.co",KEY="sb_publishable_KbjOlDRO9lS4lqhcGJIMvg_NmmWzZWY",PAGE=URL+"/functions/v1/xclusive-test-scanner";
+const sb=createClient(URL,KEY),$=id=>document.getElementById(id);let scanner=null,busy=false;
+function show(id,v){$(id).classList.toggle("hidden",!v)}
+function msg(id,t,k="neutral"){$(id).textContent=t;$(id).className="status "+k}
+async function sync(){const {data:{session}}=await sb.auth.getSession();show("loginPanel",!session);show("scannerPanel",!!session);if(session)msg("result","Signed in. This scanner is in READ-ONLY test mode.","neutral")}
+sb.auth.onAuthStateChange(()=>sync());
+$("loginBtn").onclick=async()=>{const email=$("email").value.trim(),password=$("password").value;if(!email||!password){msg("loginMsg","Enter your staff email and password.","bad");show("loginMsg",true);return}
+$("loginBtn").disabled=true;const {error}=await sb.auth.signInWithPassword({email,password});$("loginBtn").disabled=false;
+if(error){msg("loginMsg","Sign-in failed. Check email and password.","bad");show("loginMsg",true);return}show("loginMsg",false);await sync()};
+$("logoutBtn").onclick=async()=>{if(scanner){try{await scanner.stop()}catch{}}await sb.auth.signOut()};
+function tokenOf(s){s=String(s||"").trim();try{const u=new URL(s);return u.searchParams.get("token")||s}catch{return s.includes("|")?s.split("|").pop().trim():s}}
+async function verify(decoded){if(busy)return;busy=true;try{if(scanner)try{await scanner.pause(true)}catch{}
+const {data:{session}}=await sb.auth.getSession();if(!session)throw new Error("Sign in again.");
+const response=await fetch(PAGE,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+session.access_token,"apikey":KEY},body:JSON.stringify({token:tokenOf(decoded)})});
+const data=await response.json();
+if(!response.ok)msg("result",data.error||"Could not verify ticket.","bad");
+else if(data.result==="VALID")msg("result","✓ VALID TICKET — "+data.ticket_number+"\nStatus: UNUSED\nTEST ONLY — no changes made.","good");
+else if(data.result==="ALREADY_USED")msg("result","⚠ ALREADY USED — "+(data.ticket_number||"Ticket")+"\nThis test did not change its status.","bad");
+else if(data.result==="INVALID")msg("result","✕ INVALID TICKET — Not recognised.\nNo changes made.","bad");
+else if(data.result==="VOID")msg("result","✕ VOID TICKET — "+(data.ticket_number||"Ticket")+"\nNo changes made.","bad");
+else if(data.result==="UNAUTHORIZED")msg("result","Staff account is not authorised.","bad");
+else msg("result","Ticket could not be verified.","bad");
+}catch(e){msg("result",e.message||"Test scanner error. Try again.","bad")}
+show("againBtn",true)}
+$("startBtn").onclick=async()=>{if(!window.Html5Qrcode){msg("result","Scanner library failed to load. Check internet and refresh.","bad");return}
+if(!scanner)scanner=new Html5Qrcode("reader");$("startBtn").disabled=true;
+try{await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:250}},verify,()=>{});msg("result","Camera on. Hold a ticket QR in the frame.","neutral")}
+catch{msg("result","Camera could not start. Allow camera access and use HTTPS.","bad")}
+$("startBtn").disabled=false};
+$("againBtn").onclick=async()=>{show("againBtn",false);busy=false;msg("result","Ready to test the next ticket. No ticket has been changed.","neutral");try{await scanner.resume()}catch{$("startBtn").click()}};
+await sync();
+</script></body></html>
