@@ -168,12 +168,21 @@ $("logoutBtn").onclick=async()=>{
   await sb.auth.signOut();
 };
 
-function tokenOf(s){
-  s=String(s||"").trim();
+function tokenOf(value){
+  const s=String(value||"").trim();
+  if(!s)return "";
+  // Ticket QR codes contain: event name | ticket type | ticket number | raw token.
+  // The database authenticates the final token field, not the full display payload.
   try{
-    let u=new URL(s);
-    return u.searchParams.get("token")||s;
-  }catch{return s}
+    const u=new URL(s);
+    const queryToken=u.searchParams.get("token");
+    if(queryToken)return queryToken.trim();
+  }catch{}
+  if(s.includes("|")){
+    const parts=s.split("|");
+    return String(parts[parts.length-1]||"").trim();
+  }
+  return s;
 }
 
 async function redeem(decoded){
